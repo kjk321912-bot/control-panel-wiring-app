@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>제어판 배선 시뮬레이터</title>
+<meta name="theme-color" content="#1d2221">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="제어판 배선">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+:root{--bg:#1d2221;--card:#272e2d;--line:#3a4443;--tx:#e8eeed;--sub:#9fb0ad;--ac:#ffd24a;--bad:#ff8a7a}
+@media (prefers-color-scheme:light){:root{--bg:#f1f4f3;--card:#fff;--line:#cfd8d6;--tx:#1d2524;--sub:#5a6b68;--ac:#1f6f5c;--bad:#b3261e}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
+[hidden]{display:none!important}
+main{min-height:100%;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+.card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px 24px}
+h1{margin:0 0 4px;font-size:22px}
+.sub{margin:0 0 20px;color:var(--sub);font-size:14px}
+label{display:block;font-size:13px;color:var(--sub);margin-bottom:6px}
+input{width:100%;font:600 22px/1.2 "IBM Plex Mono",Consolas,monospace;letter-spacing:.08em;text-align:center;text-transform:uppercase;padding:14px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--tx)}
+input:focus{outline:2px solid var(--ac);outline-offset:1px}
+button{width:100%;margin-top:14px;padding:14px;font:600 17px/1 inherit;font-family:inherit;border:0;border-radius:10px;background:var(--ac);color:#1d2221;cursor:pointer}
+@media (prefers-color-scheme:light){button{color:#fff}}
+button:disabled{opacity:.55;cursor:default}
+.msg{min-height:22px;margin:12px 0 0;font-size:14px;line-height:1.5}
+.msg.bad{color:var(--bad)}
+.dev{margin:18px 0 0;font-size:12px;color:var(--sub);text-align:center}
+.spin{text-align:center;color:var(--sub)}
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div id="busy" class="spin">불러오는 중…</div>
+
+    <form id="form" hidden autocomplete="off">
+      <h1>제어판 배선 시뮬레이터</h1>
+      <p class="sub">전기기능사 실기 공개문제 1~18번 · 사용 코드를 입력하세요</p>
+      <label for="code">사용 코드</label>
+      <input id="code" placeholder="XXXX-XXXX-XXXX" maxlength="14" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go">
+      <button id="ok" type="submit">확인</button>
+      <p id="fmsg" class="msg" role="status"></p>
+      <p class="dev">기기 번호 <span id="dev1"></span></p>
+    </form>
+
+    <div id="offline" hidden>
+      <h1>인터넷 연결이 필요합니다</h1>
+      <p class="sub">사용 기간을 확인할 때가 되었습니다. 인터넷에 연결한 뒤 다시 시도하세요.</p>
+      <button id="retry" type="button">다시 시도</button>
+      <p class="dev">기기 번호 <span id="dev2"></span></p>
+    </div>
+
+    <div id="nosw" hidden>
+      <h1>앱을 다시 열어 주세요</h1>
+      <p class="sub">준비가 끝났습니다. 이 창을 완전히 닫았다가 다시 열면 시작됩니다. 계속 이 화면이 나오면 사파리·크롬 같은 일반 브라우저에서 열어 보세요.</p>
+    </div>
+  </div>
+</main>
+<script src="lic.js"></script>
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const MSG={
+    code:'코드를 다시 확인해 주세요.',
+    stopped:'사용이 정지된 코드입니다. 선생님께 문의하세요.',
+    otherpc:'이 코드는 이미 다른 기기에서 쓰고 있습니다. 쓸 수 있는 기기 수를 넘었습니다. 선생님께 문의하세요.',
+    expired:'사용 기간이 끝났습니다. 선생님께 연장을 문의하세요.',
+    busy:'접속이 몰려 있습니다. 잠시 뒤 다시 눌러 주세요.',
+    server:'서버에서 답이 없습니다. 잠시 뒤 다시 시도하세요.',
+    network:'인터넷에 연결되어 있지 않습니다.',
+    install:'앱을 내려받지 못했습니다. 인터넷 연결을 확인하고 다시 눌러 주세요.'
+  };
+  function show(id){for(const x of ['busy','form','offline','nosw'])$(x).hidden=(x!==id);}
+
+  async function swReady(){
+    if(!('serviceWorker' in navigator)||!window.crypto||!crypto.subtle||!window.caches) throw new Error('nosupport');
+    await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});
+    await navigator.serviceWorker.ready;
+    if(!navigator.serviceWorker.controller){
+      await new Promise(r=>{navigator.serviceWorker.addEventListener('controllerchange',r,{once:true});setTimeout(r,4000);});
+    }
+    return !!navigator.serviceWorker.controller;
+  }
+  function go(){location.replace('app/index.html');}
+
+  async function run(){
+    show('busy');
+    let ctl;
+    try{ctl=await swReady();}catch(e){
+      show('form');$('fmsg').className='msg bad';
+      $('fmsg').textContent='이 브라우저에서는 쓸 수 없습니다. 크롬·사파리·엣지의 최신 버전에서 열어 주세요.';
+      $('ok').disabled=true;return;
+    }
+    const dev=await CPW.getDev();$('dev1').textContent=dev;$('dev2').textContent=dev;
+    const r=await CPW.boot();
+    if(r.a==='go'){ if(ctl)go(); else show('nosw'); return; }
+    if(r.a==='offline'){show('offline');return;}
+    show('form');
+    const left=CPW.takeMsg();
+    if(!r.err&&left)r.err=left;
+    if(r.err){$('fmsg').className='msg bad';$('fmsg').textContent=MSG[r.err]||'확인하지 못했습니다.';}
+    $('code').focus();
+  }
+
+  $('code').addEventListener('input',e=>{
+    const v=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12);
+    e.target.value=v.replace(/(.{4})(?=.)/g,'$1-');
+  });
+  $('form').addEventListener('submit',async e=>{
+    e.preventDefault();
+    $('ok').disabled=true;$('fmsg').className='msg';$('fmsg').textContent='확인하는 중… (앱을 내려받느라 조금 걸립니다)';
+    const r=await CPW.activate($('code').value);
+    if(r.ok){ if(navigator.serviceWorker.controller)go(); else{show('nosw');} return; }
+    $('ok').disabled=false;$('fmsg').className='msg bad';$('fmsg').textContent=MSG[r.err]||'확인하지 못했습니다.';
+  });
+  $('retry').addEventListener('click',run);
+  run();
+})();
+</script>
+</body>
+</html>
